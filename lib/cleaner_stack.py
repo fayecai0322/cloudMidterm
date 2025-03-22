@@ -29,15 +29,18 @@ class CleanerStack(Stack):
         table.grant_read_write_data(self.cleaner_function)
         dst_bucket.grant_delete(self.cleaner_function)
 
-        # ✅ 单独为 GSI 添加 Query 权限
+        # ✅ 关键修复：为 DynamoDB 表本身和 GSI 添加 Query 权限
         self.cleaner_function.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query"],
-                resources=[f"{table.table_arn}/index/DisownedIndex"]
+                resources=[
+                    table.table_arn,  # 主表
+                    f"{table.table_arn}/index/DisownedIndex"  # GSI
+                ]
             )
         )
 
-        # EventBridge 规则（每分钟触发）
+        # ✅ EventBridge 规则（每分钟触发 Lambda）
         rule = events.Rule(
             self, "CleanerRule",
             schedule=events.Schedule.rate(Duration.minutes(1))
