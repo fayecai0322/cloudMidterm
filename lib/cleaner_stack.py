@@ -7,16 +7,10 @@ from aws_cdk import (
     aws_iam as iam
 )
 from constructs import Construct
-import aws_cdk.aws_dynamodb as dynamodb
-import aws_cdk.aws_s3 as s3
 
 class CleanerStack(Stack):
-    def __init__(self, scope: Construct, id: str, table_name: str, dst_bucket_name: str, **kwargs) -> None:
+    def __init__(self, scope: Construct, id: str, table, dst_bucket, **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
-
-        # Import existing resources
-        table = dynamodb.Table.from_table_name(self, "ImportedTable", table_name)
-        bucket_dst = s3.Bucket.from_bucket_name(self, "ImportedDstBucket", dst_bucket_name)
 
         self.cleaner_function = _lambda.Function(
             self, "CleanerFunction",
@@ -26,16 +20,16 @@ class CleanerStack(Stack):
             code=_lambda.Code.from_asset("lambda_functions/cleaner"),
             environment={
                 "TABLE_NAME": table.table_name,
-                "DST_BUCKET": bucket_dst.bucket_name
+                "DST_BUCKET": dst_bucket.bucket_name
             },
-            timeout=Duration.seconds(65)  # long enough for loop to run
+            timeout=Duration.seconds(90)
         )
 
-        # Permissions
+        # ✅ 权限设置
         table.grant_read_write_data(self.cleaner_function)
-        bucket_dst.grant_delete(self.cleaner_function)
+        dst_bucket.grant_delete(self.cleaner_function)
 
-        # ⛳️ Grant additional permission to query GSI
+        # ✅ 单独为 GSI 添加 Query 权限
         self.cleaner_function.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query"],
@@ -43,7 +37,7 @@ class CleanerStack(Stack):
             )
         )
 
-        # Schedule the cleaner every 1 minute
+        # EventBridge 规则（每分钟触发）
         rule = events.Rule(
             self, "CleanerRule",
             schedule=events.Schedule.rate(Duration.minutes(1))
